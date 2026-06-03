@@ -1,6 +1,28 @@
 # Source Credibility Configuration
 # Used to prioritize and validate search and fetch results
 
+# Search channels used for source discovery
+# Search result pages are discovery channels, not evidence sources.
+search_channels:
+  - name: "General web search"
+    urls:
+      - "google.com/search"
+      - "bing.com/search"
+    use_cases:
+      - "official pages"
+      - "pricing pages"
+      - "docs"
+      - "media coverage"
+  - name: "Sogou WeChat article search"
+    urls:
+      - "https://weixin.sogou.com/weixin"
+    use_cases:
+      - "微信公众号文章"
+      - "中文产品动态"
+      - "中文市场讨论"
+      - "功能案例和用户反馈"
+    notes: "Use for Chinese-language discovery. Treat search result pages as discovery only; cite and fetch the original WeChat article URL whenever available."
+
 # Trusted domains with credibility levels
 # Higher level = more trustworthy
 trusted_sources:
@@ -40,6 +62,7 @@ trusted_sources:
 excluded_domains:
   - "google.com/search"
   - "bing.com/search"
+  - "weixin.sogou.com/weixin"
   - "youtube.com"
   - "twitter.com"
   - "x.com"

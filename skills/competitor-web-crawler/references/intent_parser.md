@@ -13,6 +13,25 @@ Parse a natural language query into a structured product exploration intent obje
 | `product_competition` | User wants to compare products or find alternatives | 竞品对比 |
 | `market_monitoring` | User wants to monitor competitor updates, pricing, campaigns, or risk signals | 市场动态与风险预警 |
 
+## Analysis Focus
+
+In addition to `intent_type`, extract an optional `analysis_focus` array. This keeps the workflow compatible with the four main intents while allowing richer report styles.
+
+| Focus | Trigger Keywords | Report Emphasis |
+|-------|------------------|-----------------|
+| `business_model` | business model, monetization, revenue, pricing playbook, 商业模式, 收费模式, 变现, 收入模式, 玩法 | Monetization paths, pricing logic, revenue streams, partner economics |
+| `operation_playbook` | GTM, operation, growth, go-to-market, campaign, 运营方案, 市场运营, 增长, 渠道, 权益, 套餐, 生态 | Channel strategy, SKU/package design, user acquisition, retention, ecosystem operation |
+| `product_strategy` | roadmap, MVP, positioning, strategy, 产品策略, 定位, MVP, 路线图, 建议 | Strategic choices, MVP recommendations, validation questions |
+
+When the user asks for "运营方案和商业模式玩法", usually set:
+
+```json
+{
+  "intent_type": "market_landscape",
+  "analysis_focus": ["business_model", "operation_playbook", "product_strategy"]
+}
+```
+
 ## Parsing Rules
 
 ### Market Landscape
@@ -65,6 +84,7 @@ Example:
   "competitors": ["string"],
   "feature_focus": "string | null",
   "monitoring_scope": ["release | pricing | campaign | risk"],
+  "analysis_focus": ["business_model | operation_playbook | product_strategy"],
   "original_query": "string",
   "missing_inputs": ["string"]
 }

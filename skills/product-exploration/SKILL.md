@@ -1,6 +1,6 @@
 ---
 name: product-exploration
-description: 产品探索主技能。面向产品经理编排竞品网页自动抓取、结构化报告生成和竞品差异面板输出。当用户提到竞品、产品立项、市场扫描、功能设计、功能迭代、动态监控、风险预警、vs、替代方案时自动触发。
+description: 产品探索 workflow 主技能。先进行意图判断，再面向产品经理编排竞品网页自动抓取、结构化报告生成和竞品差异面板输出。当用户提到竞品、产品立项、市场扫描、功能设计、功能迭代、动态监控、风险预警、vs、替代方案时自动触发。
 ---
 
 # Product Exploration
@@ -9,12 +9,13 @@ description: 产品探索主技能。面向产品经理编排竞品网页自动�
 product-exploration
 
 ## Skill 目标
-接收用户的自然语言查询，识别产品探索场景，编排竞品网页抓取、结构化分析报告和竞品差异面板，交付可供产品经理判断与决策的竞品分析报告。
+接收用户的自然语言查询，作为 workflow 入口先识别产品探索场景，再编排竞品网页抓取、结构化分析报告和竞品差异面板，交付可供产品经理判断与决策的竞品分析报告。
 
 ## 适用场景
 - 产品立项与规划：扫描目标市场竞争格局，识别市场空白点和潜在机会。
 - 产品功能设计与迭代：围绕特定功能点分析竞品实现方式、用户反馈、优劣势和已知坑点。
 - 市场动态与风险预警：监控核心竞品版本更新、价格调整、市场活动、负面舆情等变化。
+- 商业模式与运营玩法：调研厂商的收费模式、SKU/套餐、渠道入口、权益体系、生态分润、MVP 路径和待验证问题。
 - 用户提到"竞品"、"vs"、"替代方案"、"市场分析"、"功能方案"、"动态监控"、"风险预警"等关键词。
 
 ## 不适用场景
@@ -28,7 +29,10 @@ product-exploration
 
 ## 处理流程
 
-### Step 1: 意图识别
+### Step 0: Workflow 初始化
+读取 `{baseDir}/references/workflow.md`，明确本次任务的执行路径、子技能调用顺序和输出要求。
+
+### Step 1: 意图判断
 读取 `{baseDir}/../competitor-web-crawler/references/intent_parser.md`，将查询解析为四种意图之一：
 
 | 意图 | 关键词 | 分析重点 |
@@ -38,7 +42,12 @@ product-exploration
 | product_competition | vs、对比、竞品、替代、alternatives | 功能/定价/定位差异 |
 | market_monitoring | 动态、监控、预警、更新、价格调整、舆情 | 版本、定价、活动、负面风险 |
 
-提取 `target_market`、`target_product`、`competitors`、`feature_focus` 和 `monitoring_scope`。信息不足时先完成可执行部分，并在报告中标注缺口。
+如用户提到"商业模式"、"运营方案"、"玩法"、"变现"、"收费模式"、"增长"、"渠道"、"权益"、"生态"、"MVP"等，额外设置 `analysis_focus`：
+- `business_model`：商业模式、收入来源、计费单位、套餐/SKU、分润机制。
+- `operation_playbook`：市场运营、渠道入口、权益体系、增长动作、生态运营。
+- `product_strategy`：MVP 路径、产品定位、验证问题和落地建议。
+
+输出结构化 intent 对象，包含 `intent_type`、`target_market`、`target_product`、`competitors`、`feature_focus`、`monitoring_scope`、`analysis_focus` 和 `missing_inputs`。信息不足时先完成可执行部分，并在报告中标注缺口。
 
 ### Step 2: 自动抓取竞品网页
 调用 `competitor-web-crawler` 子技能：
@@ -51,6 +60,7 @@ product-exploration
 调用 `report-generator` 子技能：
 - 读取 `{baseDir}/../report-generator/references/data_cleaning.md` 清洗抓取结果。
 - 读取 `{baseDir}/../report-generator/references/report_template.md` 选择场景模板。
+- 若存在 `analysis_focus`，追加商业模式、运营玩法、MVP 建议和验证问题等增强章节。
 - 生成完整 Markdown 竞品分析报告。
 
 ### Step 4: 竞品差异面板
@@ -70,6 +80,7 @@ product-exploration
 - References
 
 ## 依赖资源
+- `{baseDir}/references/workflow.md` — workflow 执行路径与意图路由规则
 - `competitor-web-crawler` 子技能 — 自动抓取竞品网页
 - `report-generator` 子技能 — 数据清洗与报告生成
 - `difference-panel` 子技能 — 竞品差异面板
@@ -81,6 +92,7 @@ product-exploration
 - 不确定信息标注 `[unverified]`。
 - 所有来源必须在 References 部分列出完整 URL。
 - 对产品建议使用"可考虑"、"需验证"等措辞，不替用户做最终业务决策。
+- 商业模式/运营玩法相关结论必须区分公开事实、策略推断和待验证问题。
 
 ## 示例调用
 

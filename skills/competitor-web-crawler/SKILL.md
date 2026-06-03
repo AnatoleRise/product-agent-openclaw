@@ -43,6 +43,12 @@ competitor-web-crawler
 - 产品官网、功能页、定价页、帮助中心、开发者文档
 - 更新日志、release notes、blog、press/newsroom
 - 权威科技媒体、行业报告、可信知识平台
+- 中文场景下可将搜狗微信公众号文章搜索 `https://weixin.sogou.com/weixin` 作为补充发现渠道，用于发现公众号文章中的产品动态、案例、用户反馈和舆情信号
+
+覆盖目标：
+- 市场格局或开放式竞品研究场景下，目标识别 5 个核心竞品。
+- 每个核心竞品尽量保留至少 3 个可信来源。
+- 可信来源优先级：官方来源 > 权威媒体/行业报告 > 可信知识平台 > 弱信号来源。
 
 ### Step 3: 网页抓取
 对以下关键 URL 使用 OpenClaw `web_fetch` 抓取正文：
@@ -54,7 +60,7 @@ competitor-web-crawler
 
 ### Step 4: 结果过滤
 读取 `{baseDir}/assets/sources.yaml` 进行过滤：
-- 排除搜索引擎页面、低质量聚合页和无关社交内容。
+- 排除搜索引擎页面、低质量聚合页和无关社交内容；搜狗微信搜索结果页仅作为发现渠道，不作为最终证据来源。
 - 常规分析排除评论聚合站；功能反馈或风险预警场景下，仅在有明确证据价值时保留并标注 `[unverified]`。
 - 优先保留官方来源和权威媒体来源。
 
@@ -64,12 +70,19 @@ competitor-web-crawler
 - 丢弃内容重复度 >80% 的条目。
 - 为每条结果标注 `source_type`、`credibility_level`、`fetch_status` 和 `evidence_tags`。
 
+### Step 6: 证据充分性检查
+- 若核心竞品少于 5 个，执行补充检索。
+- 若任一核心竞品可信来源少于 3 个，执行补充检索。
+- 若补充检索没有新增高价值来源，停止检索并标注缺口。
+- 最多执行 2 轮补充检索，避免无限搜索。
+
 ## 输出格式
 ```json
 {
   "intent_type": "market_landscape | feature_iteration | product_competition | market_monitoring",
   "query_count": 8,
   "fetched_count": 12,
+  "core_competitor_count": 5,
   "results": [
     {
       "title": "...",
@@ -84,7 +97,14 @@ competitor-web-crawler
     }
   ],
   "excluded_count": 12,
-  "deduped_count": 5
+  "deduped_count": 5,
+  "coverage_gaps": [
+    {
+      "product": "...",
+      "missing": "credible_sources | official_page | pricing | feature_page",
+      "note": "..."
+    }
+  ]
 }
 ```
 
@@ -95,6 +115,8 @@ competitor-web-crawler
 
 ## 注意事项
 - 查询需中英双语并行，最大化覆盖率。
+- 市场格局或开放式竞品研究默认目标为 5 个核心竞品。
+- 每个核心竞品至少尝试收集 3 个可信来源；达不到时必须标注缺口。
 - 对比场景中如有多个竞品名，必须分别抓取每个竞品的官网、功能页和定价页。
 - 动态监控场景必须优先抓取更新日志、官方博客、新闻稿、定价页和可信媒体。
 - 未抓取到正文的信息只能作为摘要级证据，不能做强结论。
