@@ -33,7 +33,7 @@
 
 ```
 用户查询
-  → Step 1: 意图识别（product-exploration 主技能）
+  → Step 1: 意图判断（product-exploration workflow 主技能）
   → Step 2: 自动抓取竞品网页（competitor-web-crawler 子技能）
   → Step 3: 数据清洗 + 结构化报告生成（report-generator 子技能）
   → Step 4: 输出竞品差异面板（difference-panel 子技能）
@@ -64,7 +64,7 @@
 
 ## 协作方式
 
-- 主技能 `product-exploration` 负责编排调度
+- 主技能 `product-exploration` 是 workflow 入口，负责先做意图判断，再编排调度
 - 子技能 `competitor-web-crawler` 负责自动发现并抓取竞品网页
 - 子技能 `report-generator` 负责数据清洗与报告生成
 - 子技能 `difference-panel` 负责生成竞品差异面板

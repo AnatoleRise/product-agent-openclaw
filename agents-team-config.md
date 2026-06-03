@@ -558,4 +558,3 @@ sessions_spawn(
 - 子 Agent 被误绑飞书入口，造成对外口径分裂。
 - `sessions_spawn` 上下文缺失，结果不可验收。
 - 默认执行 `gateway restart`，中断当前服务链路。
-

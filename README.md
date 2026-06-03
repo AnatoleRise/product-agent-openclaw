@@ -45,6 +45,8 @@
 请开始引导我配置吧！
 ```
 
+> 注意：产品探索智能体的真实子 Agent 目录是 `product_discovery/`，对应 OpenClaw Agent ID 为 `product_discovery`。不要把外部仓库中的 `agents/product-exploration-agent/` 当成本项目目录使用。
+
 ---
 
 本文档定义一套「主智能体统一入口 + 6 个产品子智能体后台协作」的协作体系。  
