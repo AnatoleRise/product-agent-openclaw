@@ -174,7 +174,7 @@ flowchart TD
 
 *   **目标**：让产品经理能够通过 OpenClaw 平台规范化调用各项 AI 辅助能力。
 *   **行动项**：
-    1.  完成 6 个子智能体与 21 个已实现 Skill 的基础配置。
+    1.  完成 6 个子智能体与 20 个已实现 Skill 的基础配置。
     2.  推广"先澄清目标、再调度执行"的使用规范。
     3.  建立飞书多维表格需求池数据底座。
     4.  对 `skills/pm-agent/` 空占位目录补齐 `SKILL.md`，或在安装流程中明确跳过。
@@ -237,7 +237,6 @@ flowchart TD
 - 用户反馈结构化处理（user-feedback-processor）：`/user-feedback-processor/`
 - 主动预警与风险拦截（alert-early-warning）：`/alert-early-warning/`
 - 数据可视化与看板生成（data-visualization）：`/data-visualization/`
-- 项目管理周报监控助手（pm-weekly-monitor）：`/pm-weekly-monitor/`
 
 请开始引导我配置吧！
 ```
@@ -283,4 +282,3 @@ flowchart TD
 | `用户反馈结构化处理` | `skills/user-feedback-processor/` | 整合客服、应用商店、社群、问卷等多渠道反馈，进行清洗、去重、归类和需求提取 |
 | `主动预警与风险拦截` | `skills/alert-early-warning/` | 实时捕捉舆情爆发点与指标异常值，支持多级别预警、多渠道通知和智能阈值调整 |
 | `数据可视化与看板生成` | `skills/data-visualization/` | 将分析结果转化为可交互 HTML 看板，支持趋势图、饼图、热力图、词云等图表类型 |
-| `项目管理周报监控助手` | `skills/pm-weekly-monitor/` | 读取飞书项目管理周报，主动预警风险、定时推送重点项目进展、支持自然语言配置定时任务 |
