@@ -205,16 +205,19 @@ flowchart TD
 请帮我配置「产品管理智能体团队」。
 
 **第一步：下载项目文件**
-- 从 `https://github.com/AnatoleRise/Agents/tree/main/product-agent-openclaw` 获取项目文件，完整下载到 `workspace/cache/product-agent-openclaw/` 目录下
+- 从 `https://github.com/AnatoleRise/product-agent-openclaw` 获取项目文件，完整下载到 `workspace/cache/product-agent-openclaw/` 目录下
 - 若目录 `workspace/cache/product-agent-openclaw/` 已存在，则先删除再重新下载覆盖安装
 - 若网络原因无法下载，则跳过下载直接进行第二步
 
 **第二步：配置多 Agent 架构**
-- 参考 `https://github.com/AnatoleRise/Agents/blob/main/product-agent-openclaw/agents-team-config.md` 中的配置说明，完成多 Agent 配置并将相关文件移动到位
+- 配置说明：`https://github.com/AnatoleRise/product-agent-openclaw/blob/main/agents-team-config.md`
+- 参考上述配置说明，完成多 Agent 配置并将相关文件移动到位
 - 目标架构为 1 个主智能体 `main` + 6 个子智能体：`customer_research`、`product_discovery`、`user_analysis`、`requirement_management`、`solution_design`、`requirement_review`
 - 按步骤引导我完成
 
 **第三步：安装全部技能**
+skills 地址：`https://github.com/AnatoleRise/product-agent-openclaw/tree/main/skills`
+
 多 Agent 配置完成后，将 `workspace/cache/product-agent-openclaw/skills/` 下带有 `SKILL.md` 的技能逐个移动到 `workspace/skills/`，并确保安装：
 
 - 交互原型生成器（interactive-prototype-generator）：`/interactive-prototype-generator/`
