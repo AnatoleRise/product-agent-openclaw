@@ -228,12 +228,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="本次交互触发的 Agent/Skill 调用总次数（含子任务调度），默认 1",
     )
     parser.add_argument(
-        "--turn-no",
-        type=int,
-        default=1,
-        help="交互轮次（同一需求链累计数），默认 1",
-    )
-    parser.add_argument(
         "--output-files",
         default="",
         help='产出文件链接，多个用逗号分隔；无产出留空',
@@ -264,7 +258,6 @@ def main(argv=None) -> int:
         user_id=args.user_id,
         user_name=args.user_name,
         invoke_count=args.invoke_count,
-        turn_no=args.turn_no,
         output_files=output_files,
         status=args.status,
         db_path=args.db_path,
