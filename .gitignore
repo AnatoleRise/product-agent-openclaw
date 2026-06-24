@@ -2,3 +2,9 @@
 **/.DS_Store
 AGENTS.md
 CLAUDE.md
+
+# 使用数据埋点运行时产物（本地 SQLite 库与兜底日志，不提交）
+usage.db
+usage.db-wal
+usage.db-shm
+failed_events.jsonl
