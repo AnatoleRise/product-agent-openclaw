@@ -45,7 +45,59 @@
 
 ---
 
-# 二、 核心智能体角色（Roles）与能力建设
+# 二、 快速开始
+
+> **使用方式**：将以下提示词直接发送给你的 OpenClaw，即可启动一键配置。
+
+```
+请帮我配置「产品管理智能体团队」。
+
+**第一步：下载项目文件**
+- 从 `https://github.com/AnatoleRise/product-agent-openclaw` 获取项目文件，完整下载到 `workspace/cache/product-agent-openclaw/` 目录下
+- 若目录 `workspace/cache/product-agent-openclaw/` 已存在，则先删除再重新下载覆盖安装
+- 若网络原因无法下载，则跳过下载直接进行第二步
+
+**第二步：配置多 Agent 架构**
+- 配置说明：`https://github.com/AnatoleRise/product-agent-openclaw/blob/main/agents-team-config.md`
+- 参考上述配置说明，完成多 Agent 配置并将相关文件移动到位
+- 目标架构为 1 个主智能体 `main` + 6 个子智能体：`customer_research`、`product_discovery`、`user_analysis`、`requirement_management`、`solution_design`、`requirement_review`
+- 按步骤引导我完成
+
+**第三步：安装全部技能**
+skills 地址：`https://github.com/AnatoleRise/product-agent-openclaw/tree/main/skills`
+
+多 Agent 配置完成后，将 `workspace/cache/product-agent-openclaw/skills/` 下带有 `SKILL.md` 的技能逐个移动到 `workspace/skills/`，并确保安装：
+
+- 交互原型生成器（interactive-prototype-generator）：`/interactive-prototype-generator/`
+- 飞书需求看板（feishu-requirement-board）：`/feishu-requirement-board/`
+- 搜索引擎（search-engine）：`/search-engine/`
+- 飞书需求录入（feishu-requirement-entry）：`/feishu-requirement-entry/`
+- PRD文档生成器（prd-document-generator）：`/prd-document-generator/`
+- 竞品调研（competitor-research）：`/competitor-research/`
+- 问题追踪器（issue-tracker）：`/issue-tracker/`
+- 报告生成器（report-generator）：`/report-generator/`
+- 逻辑检测器（logic-detector）：`/logic-detector/`
+- 飞书需求归档（feishu-requirement-archive）：`/feishu-requirement-archive/`
+- 业务流程图生成器（business-diagram-generator）：`/business-diagram-generator/`
+- 客研管理（customer-research）：`/customer-research/`
+- 产品探索（product-exploration）：`/product-exploration/`
+- 竞品网页抓取器（competitor-web-crawler）：`/competitor-web-crawler/`
+- 竞品差异面板（difference-panel）：`/difference-panel/`
+- 应用市场舆情洞察（app-market-sentiment）：`/app-market-sentiment/`
+- 核心业务指标分析（core-metrics-analysis）：`/core-metrics-analysis/`
+- 用户反馈结构化处理（user-feedback-processor）：`/user-feedback-processor/`
+- 主动预警与风险拦截（alert-early-warning）：`/alert-early-warning/`
+- 数据可视化与看板生成（data-visualization）：`/data-visualization/`
+- 使用数据埋点与统计（telemetry-tracker）：`/telemetry-tracker/`
+
+请开始引导我配置吧！
+```
+
+> **注意**：产品探索智能体的真实子 Agent 目录是 `product_discovery/`，对应 OpenClaw Agent ID 为 `product_discovery`。不要把外部仓库中的 `agents/product-exploration-agent/` 当成本项目目录使用。`skills/pm-agent/` 当前为空占位目录，不应作为可安装 Skill 处理。
+
+---
+
+# 三、 核心智能体角色（Roles）与能力建设
 
 产品智能体系统可划分为 **1 个主智能体 + 6 个专业子智能体**：
 
@@ -107,7 +159,7 @@
 
 ---
 
-# 三、 智能体系统的运行机制
+# 四、 智能体系统的运行机制
 
 要让产品智能体在真实产品工作中稳定运行，必须遵守以下四套核心机制：
 
@@ -166,7 +218,7 @@ flowchart TD
 
 ---
 
-# 四、 产品智能体建设分阶段落地路线图
+# 五、 产品智能体建设分阶段落地路线图
 
 产品智能体的建设不建议一步到位，可以按照从"单点能力接入"到"全流程平台编排"的步骤逐步演进：
 
@@ -194,58 +246,6 @@ flowchart TD
     1.  将需求状态、项目周报、用户舆情和核心业务指标纳入统一巡检。
     2.  建立从用户反馈到需求入库、从评审问题到整改复检的自动追踪链路。
     3.  与研发智能体共享 PRD、验收场景、流程图和评审结论，降低研产交接损耗。
-
----
-
-# 五、 快速开始
-
-> **使用方式**：将以下提示词直接发送给你的 OpenClaw，即可启动一键配置。
-
-```
-请帮我配置「产品管理智能体团队」。
-
-**第一步：下载项目文件**
-- 从 `https://github.com/AnatoleRise/product-agent-openclaw` 获取项目文件，完整下载到 `workspace/cache/product-agent-openclaw/` 目录下
-- 若目录 `workspace/cache/product-agent-openclaw/` 已存在，则先删除再重新下载覆盖安装
-- 若网络原因无法下载，则跳过下载直接进行第二步
-
-**第二步：配置多 Agent 架构**
-- 配置说明：`https://github.com/AnatoleRise/product-agent-openclaw/blob/main/agents-team-config.md`
-- 参考上述配置说明，完成多 Agent 配置并将相关文件移动到位
-- 目标架构为 1 个主智能体 `main` + 6 个子智能体：`customer_research`、`product_discovery`、`user_analysis`、`requirement_management`、`solution_design`、`requirement_review`
-- 按步骤引导我完成
-
-**第三步：安装全部技能**
-skills 地址：`https://github.com/AnatoleRise/product-agent-openclaw/tree/main/skills`
-
-多 Agent 配置完成后，将 `workspace/cache/product-agent-openclaw/skills/` 下带有 `SKILL.md` 的技能逐个移动到 `workspace/skills/`，并确保安装：
-
-- 交互原型生成器（interactive-prototype-generator）：`/interactive-prototype-generator/`
-- 飞书需求看板（feishu-requirement-board）：`/feishu-requirement-board/`
-- 搜索引擎（search-engine）：`/search-engine/`
-- 飞书需求录入（feishu-requirement-entry）：`/feishu-requirement-entry/`
-- PRD文档生成器（prd-document-generator）：`/prd-document-generator/`
-- 竞品调研（competitor-research）：`/competitor-research/`
-- 问题追踪器（issue-tracker）：`/issue-tracker/`
-- 报告生成器（report-generator）：`/report-generator/`
-- 逻辑检测器（logic-detector）：`/logic-detector/`
-- 飞书需求归档（feishu-requirement-archive）：`/feishu-requirement-archive/`
-- 业务流程图生成器（business-diagram-generator）：`/business-diagram-generator/`
-- 客研管理（customer-research）：`/customer-research/`
-- 产品探索（product-exploration）：`/product-exploration/`
-- 竞品网页抓取器（competitor-web-crawler）：`/competitor-web-crawler/`
-- 竞品差异面板（difference-panel）：`/difference-panel/`
-- 应用市场舆情洞察（app-market-sentiment）：`/app-market-sentiment/`
-- 核心业务指标分析（core-metrics-analysis）：`/core-metrics-analysis/`
-- 用户反馈结构化处理（user-feedback-processor）：`/user-feedback-processor/`
-- 主动预警与风险拦截（alert-early-warning）：`/alert-early-warning/`
-- 数据可视化与看板生成（data-visualization）：`/data-visualization/`
-- 使用数据埋点与统计（telemetry-tracker）：`/telemetry-tracker/`
-
-请开始引导我配置吧！
-```
-
-> **注意**：产品探索智能体的真实子 Agent 目录是 `product_discovery/`，对应 OpenClaw Agent ID 为 `product_discovery`。不要把外部仓库中的 `agents/product-exploration-agent/` 当成本项目目录使用。`skills/pm-agent/` 当前为空占位目录，不应作为可安装 Skill 处理。
 
 ---
 
@@ -287,4 +287,3 @@ skills 地址：`https://github.com/AnatoleRise/product-agent-openclaw/tree/main
 | `主动预警与风险拦截` | `skills/alert-early-warning/` | 实时捕捉舆情爆发点与指标异常值，支持多级别预警、多渠道通知和智能阈值调整 |
 | `数据可视化与看板生成` | `skills/data-visualization/` | 将分析结果转化为可交互 HTML 看板，支持趋势图、饼图、热力图、词云等图表类型 |
 | `使用数据埋点与统计` | `skills/telemetry-tracker/` | 使用数据采集与统计，自动埋点写入 SQLite，支持使用情况查询与中文文本汇报 |
-
