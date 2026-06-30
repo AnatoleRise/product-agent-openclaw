@@ -206,9 +206,12 @@ workspace 路径：`~/.openclaw/workspace`
 1. 先澄清后执行：不清楚不启动。
 2. 最小必要调度：能单 Agent 完成，不并发多 Agent。
 3. 结果可验收：每次派发都必须带明确输入、输出与验收标准。
-4. 会话启动加载用户记忆：每次会话开始时，必须先加载 `~/.openclaw/workspace/shared/telemetry/Relationships.md`（JSON 格式的用户身份记忆），用当前用户的 user_id 查询对应的姓名。命中则整轮对话直接使用该姓名；未命中则按「姓名获取链路」处理，获取后回写到 Relationships.md。
+4. 会话启动识别用户身份（尽力获取）：每次会话开始时，**尽力调用 `session_status(sessionKey="current")`** 获取当前会话的身份信息，从中解析出 **sessionKey**（如 `agent:main:wecom:direct:wo_xxx` 或 `agent:main:feishu:direct:ou_xxx`）和**渠道用户 ID**（sessionKey 最后一段，如 `wo_xxx` / `ou_xxx`，渠道无关）。**拿不到身份不影响埋点**——身份缺失时仍正常埋点（记为匿名），只是无法归属到具体用户。
+5. 会话启动加载用户记忆：拿到渠道用户 ID 后，加载 `~/.openclaw/workspace/shared/telemetry/Relationships.md`（JSON 格式的用户身份记忆），用该 user_id 查询对应的姓名。命中则整轮对话直接使用该姓名；未命中则按「姓名获取链路」处理，获取后回写到 Relationships.md。
 
-> **Relationships.md 说明**：这是跨 Agent 共享的用户身份记忆文件，存储 `user_id → 姓名` 的映射，格式为 JSON（如 `{"zhangsan":"张三"}`）。所有智能体/技能共用同一份，避免重复询问用户。详见 `skills/telemetry-tracker/SKILL.md`。
+> **身份识别说明**：OpenClaw 的 sessionKey 天然编码了用户身份，格式为 `agent:<agentId>:<渠道>:<chatType>:<用户标识>`，支持飞书（feishu）、企业微信（wecom）等多渠道。sessionKey 的最后一段是跨会话稳定的渠道用户 ID，是区分不同用户的唯一凭证。详见 `skills/telemetry-tracker/SKILL.md`。
+>
+> **Relationships.md 说明**：这是跨 Agent 共享的用户身份记忆文件，键为渠道用户 ID（如 `wo_xxx`），值为姓名，格式为 JSON（如 `{"wo1rsbeqaaua2k6c03rsqzhwk7uhejqg":"陛下"}`）。所有智能体/技能共用同一份，避免重复询问用户。
 
 ## 澄清机制（硬规则）
 任务启动前必须确认以下 6 项：
@@ -250,47 +253,69 @@ workspace 路径：`~/.openclaw/workspace`
 
 #### 上报方式
 
-主智能体识别本次交互的行为类型后，**调用 `telemetry-tracker` 技能**完成使用数据的自动上报（不直接执行底层脚本）。该技能内部会：
+主智能体识别本次交互的行为类型后，**调用 `telemetry-tracker` 技能**完成使用数据的自动上报（不直接执行底层脚本）。调用时必须传递以下上下文：
 
-1. 根据本次行为类型（agent / skill / chat），写入对应的使用记录。
-2. 自动处理姓名获取链路与失败兜底，全程静默。
+1. **会话身份**：会话启动时通过 `session_status` 获取的 `session_key` 与解析出的 `user_id`（身份识别的结果，整轮保留）。
+2. **行为类型**：agent / skill / chat。
+3. **目标信息**：目标 ID、中文名、用户原始输入、产出文件等。
 
-> **注意**：主智能体只负责识别行为类型、传递必要的上下文（目标 ID、用户输入、产出文件等）给技能，具体的字段拼接、脚本执行、写入逻辑由 `telemetry-tracker` 技能自行完成，详见 `skills/telemetry-tracker/SKILL.md`。
+该技能内部会根据行为类型写入使用记录，并自动处理姓名获取链路与失败兜底，全程静默。
+
+> **注意**：`session_key` 与 `user_id` 用于区分多用户，**尽力获取并传递**。身份缺失时仍正常埋点（记为匿名），保证使用次数统计不丢。主智能体只负责识别行为与传递上下文，具体的字段拼接、脚本执行、写入逻辑由 `telemetry-tracker` 技能自行完成，详见 `skills/telemetry-tracker/SKILL.md`。
 
 ---
 
-### 二、用户姓名获取链路（Relationships.md 记忆优先）
+### 二、用户身份与姓名获取链路（session_status 识别 + Relationships.md 记忆）
 
-获取真实姓名时，按以下顺序依次处理。**Relationships.md 记忆优先级最高**，命中即用、无需再查；任何一层成功获取姓名后，都必须**回写到 Relationships.md**，供下次直接命中。
+获取用户身份与真实姓名时，按以下顺序依次处理。**身份识别是尽力获取的加分项，缺失时正常埋点（记为匿名）**；拿到身份后，姓名优先查 Relationships.md 记忆，命中即用。任何一层成功获取姓名后，都必须**回写到 Relationships.md**，供下次直接命中。
 
-第 0 层（最高优先级 · 本地记忆）：
-  会话开始时已加载 Relationships.md，用当前 user_id 查询。
-  命中 -> 直接使用该姓名，整轮对话可用，无需再查。
+第 0 层（身份识别 · 会话启动尽力执行）：
+  调用 session_status(sessionKey="current") 获取当前会话信息。
+  从返回结果解析 sessionKey（如 agent:main:wecom:direct:wo_xxx），
+  并提取渠道用户 ID（sessionKey 最后一段，渠道无关）。
+  -> 整轮对话保留 sessionKey 与 user_id，埋点上报时传递。
+  ⚠️ 拿不到身份也正常埋点（记为匿名），不阻断后续链路。
+      ↓ 拿到 user_id（或走匿名）
+第 1 层（本地记忆 · Relationships.md）：
+  加载 ~/.openclaw/workspace/shared/telemetry/Relationships.md，
+  用上述 user_id 查询。
+  命中 -> 直接使用该姓名，无需再查。
       ↓ 未命中 / 文件不存在
-第 1 层（对话层 · LLM 执行）：
+第 2 层（对话层 · LLM 执行）：
   调用 wecom-cli contact get_userlist，用当前 user_id 反查真实姓名。
   注意该接口仅返回可见范围 ≤10 人的成员，可能查不到。
   查到 -> 填入 --user-name，并回写 Relationships.md。
       ↓ 查不到 / 报错 / 不在可见范围
-第 2 层（对话层 · LLM 主动询问用户）：
+第 3 层（对话层 · LLM 主动询问用户）：
   在对话中询问：「请问您的姓名是？」
   用户回复 -> 填入 --user-name，并回写 Relationships.md。
-  用户不回复 -> 进入第 3 层。
+  用户不回复 -> 进入第 4 层。
       ↓
-第 3 层（脚本层 · 自动兜底）：
-  --user-name 为空时，脚本用 --user-id 兜底；
-  --user-id 也为空时，填 "unknown"。全程静默。
+第 4 层（脚本层 · 自动兜底）：
+  --user-name 为空时，脚本用 --user-id（或从 --session-key 解析）兜底；
+  user_id 也为空时，填 "unknown"。全程静默。
   （此层不回写 Relationships.md，因姓名未知）
+
+#### sessionKey 身份解析规则（渠道无关）
+
+OpenClaw 的 sessionKey 格式统一为 `agent:<agentId>:<渠道>:<chatType>:<用户标识>`：
+
+| 渠道 | sessionKey 示例 | 解析出的 user_id |
+|---|---|---|
+| 企业微信 | `agent:main:wecom:direct:wo1rsbeqaaua2k6c03rsqzhwk7uhejqg` | `wo1rsbeqaaua2k6c03rsqzhwk7uhejqg` |
+| 飞书 | `agent:main:feishu:direct:ou_00beb6896485dbac9c92249d87a04534` | `ou_00beb6896485dbac9c92249d87a04534` |
+
+> 解析方法：取 sessionKey 以 `:` 分割后的最后一段作为 user_id，第 3 段作为渠道。脚本 `track_usage.py` 内置 `parse_identity()` 函数自动完成。
 
 #### Relationships.md 读写规则
 
 - **文件路径**：`~/.openclaw/workspace/shared/telemetry/Relationships.md`
-- **格式**：JSON，键为 user_id，值为姓名。示例：`{"zhangsan":"张三","lisi":"李四"}`
-- **读取**：会话开始时加载，用 user_id 查询。
-- **回写**：第 1、2 层成功获取姓名后，把 `{user_id: 姓名}` 追加到 JSON 中并保存。**禁止覆盖已有其他用户的记录**，只新增或更新当前用户。
-- **首次运行**：文件不存在视为空记忆 `{}`，正常进入第 1 层。
+- **格式**：JSON，键为渠道用户 ID，值为姓名。示例：`{"wo1rsbeqaaua2k6c03rsqzhwk7uhejqg":"陛下","ou_00beb...04534":"张三"}`
+- **读取**：会话开始时（第 1 层）加载，用 user_id 查询。
+- **回写**：第 2、3 层成功获取姓名后，把 `{user_id: 姓名}` 追加到 JSON 中并保存。**禁止覆盖已有其他用户的记录**，只新增或更新当前用户。
+- **首次运行**：文件不存在视为空记忆 `{}`，正常进入第 2 层。
 
-> **设计说明**：Relationships.md 是长期记忆，让每个用户只需被询问一次姓名；`wecom-cli contact` 受可见范围限制只作为补充查询；「询问」是对话动作只能由 LLM 完成；脚本只做最后兜底。
+> **设计说明**：身份识别是区分多用户的前提，必须靠 session_status 拿到 sessionKey；Relationships.md 让每个用户只需被询问一次姓名；`wecom-cli contact` 受可见范围限制只作为补充查询；「询问」是对话动作只能由 LLM 完成；脚本只做最后兜底。
 
 ---
 
@@ -332,8 +357,9 @@ workspace 路径：`~/.openclaw/workspace`
 | target_name | 智能体或技能 ID；普通对话填 `-` | `product_discovery` |
 | target_label | 中文名 | `产品探索智能体` |
 | user_query | 用户原始输入（截断 500 字） | `帮我做竞品分析` |
-| user_id | 用户标识 | `zhangsan` |
+| user_id | 渠道用户标识（sessionKey 最后一段）；取不到则脚本从 session_key 解析 | `wo1rsbeqaaua2k6c03rsqzhwk7uhejqg` |
 | user_name | 真实姓名；取不到回退 user_id / unknown | `张三` |
+| session_key | 完整会话标识（渠道无关），由 session_status 获取 | `agent:main:wecom:direct:wo_xxx` |
 | invoke_count | 本次触发子调用次数 | `2` |
 | output_files | 产出文件链接（JSON 数组） | `["report.md"]` |
 | status | `success` / `failed` | `success` |

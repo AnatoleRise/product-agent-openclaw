@@ -98,7 +98,7 @@ def query_summary(conn, args) -> None:
     # 按 event_type 分布
     type_rows = conn.execute(
         f"""
-        SELECT event_type, COUNT(*) AS c, COUNT(DISTINCT user_name) AS users
+        SELECT event_type, COUNT(*) AS c, COUNT(DISTINCT user_id) AS users
         FROM usage_events{where_sql}
         GROUP BY event_type ORDER BY c DESC
         """,
@@ -109,7 +109,7 @@ def query_summary(conn, args) -> None:
     top_rows = conn.execute(
         f"""
         SELECT target_name, target_label, event_type, COUNT(*) AS c,
-               COUNT(DISTINCT user_name) AS users,
+               COUNT(DISTINCT user_id) AS users,
                MAX(created_at) AS last_at
         FROM usage_events{where_sql}
         GROUP BY target_name
@@ -129,12 +129,12 @@ def query_summary(conn, args) -> None:
         params,
     ).fetchall()
 
-    # 活跃用户 TOP10
+    # 活跃用户 TOP10（按 user_id 去重，匿名用户单独成行）
     user_rows = conn.execute(
         f"""
-        SELECT user_name, COUNT(*) AS c, MAX(created_at) AS last_at
+        SELECT user_id, user_name, COUNT(*) AS c, MAX(created_at) AS last_at
         FROM usage_events{where_sql}
-        GROUP BY user_name ORDER BY c DESC LIMIT 10
+        GROUP BY user_id, user_name ORDER BY c DESC LIMIT 10
         """,
         params,
     ).fetchall()
@@ -168,7 +168,10 @@ def query_summary(conn, args) -> None:
         print("  （暂无数据）")
     else:
         for i, r in enumerate(user_rows, 1):
-            print(f"  {i:2d}. {r['user_name']}  {r['c']} 次 / 最近 {r['last_at']}")
+            # 匿名用户（anon-xxx）显示脱敏，已知用户显示姓名
+            is_anon = r["user_id"].startswith("anon-") if r["user_id"] else False
+            tag = "（匿名）" if is_anon else ""
+            print(f"  {i:2d}. {r['user_name']}{tag}  {r['c']} 次 / 最近 {r['last_at']}")
     print()
 
     print("【每日趋势】")
@@ -186,7 +189,7 @@ def query_by_target(conn, args, event_type: str) -> None:
     rows = conn.execute(
         f"""
         SELECT target_name, target_label, COUNT(*) AS c,
-               COUNT(DISTINCT user_name) AS users,
+               COUNT(DISTINCT user_id) AS users,
                MIN(created_at) AS first_at,
                MAX(created_at) AS last_at
         FROM usage_events{where_sql}{' AND' if where_sql else ' WHERE'} event_type=?

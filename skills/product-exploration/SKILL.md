@@ -123,11 +123,12 @@ Output: 市场动态与风险预警报告，包含更新、价格、活动、舆
 - **目标 ID**：`product-exploration`
 - **目标中文名**：`产品探索`
 - **用户原始输入**：本次任务的原始 query
+- **会话身份（尽力获取）**：通过 `session_status(sessionKey="current")` 获取的 `session_key`（如 `agent:main:wecom:direct:wo_xxx`，渠道无关）与解析出的渠道用户 ID，用于区分多用户。**拿不到身份时仍正常埋点（记为匿名），不阻断上报**
 - **当前用户 ID 与姓名**：用于归属记录
 - **产出文件链接**：本次任务产出的文件，无则留空
 
 > **注意**：本技能不直接执行底层上报脚本，只负责把上述上下文交给 `telemetry-tracker` 技能，由该技能完成字段拼接、写入与兜底。
 
-**姓名获取链路（Relationships.md 记忆优先）**：会话开始时加载 `~/.openclaw/workspace/shared/telemetry/Relationships.md`（`user_id→姓名` 的 JSON 记忆，如 `{"zhangsan":"张三"}`），用 user_id 查询，命中即用 → 未命中则调 `wecom-cli contact` 反查 → 仍查不到则询问用户 → 用户不回复则技能用 user_id 兜底（皆空填 `unknown`）。**第 1 层反查或询问成功后，都要把 `{user_id:姓名}` 回写到 `~/.openclaw/workspace/shared/telemetry/Relationships.md`，供下次直接命中。**
+**身份与姓名获取链路（session_status 识别 + Relationships.md 记忆）**：会话开始时先调 `session_status(sessionKey="current")` 获取 `session_key`（渠道无关，如企业微信 `agent:main:wecom:direct:wo_xxx`），解析出渠道用户 ID → 用该 ID 查 `~/.openclaw/workspace/shared/telemetry/Relationships.md` 记忆，命中即用 → 未命中则调 `wecom-cli contact` 反查 → 仍查不到则询问用户 → 用户不回复则技能用 user_id 兜底（皆空填 `unknown`）。**反查或询问成功后，都要把 `{user_id:姓名}` 回写到 Relationships.md，供下次直接命中。**
 
 详细规则见 `skills/telemetry-tracker/SKILL.md`。

@@ -36,7 +36,8 @@ python3 ~/.openclaw/workspace/skills/telemetry-tracker/scripts/track_usage.py \
   --target-name product_discovery \
   --target-label "产品探索智能体" \
   --user-query "用户原始输入文本" \
-  --user-id zhangsan \
+  --session-key "agent:main:wecom:direct:wo_xxx" \
+  --user-id wo_xxx \
   --user-name "张三"
 ```
 
@@ -46,7 +47,8 @@ python3 ~/.openclaw/workspace/skills/telemetry-tracker/scripts/track_usage.py \
 | `--target-name` | 是 | 智能体或技能的 ID；普通对话填 `-` |
 | `--target-label` | 否 | 中文名，便于汇报展示 |
 | `--user-query` | 否 | 用户原始输入（自动截断到 500 字） |
-| `--user-id` | 否 | 用户标识 |
+| `--session-key` | 否 | 完整会话标识（渠道无关），由调用方通过 session_status 获取；脚本会从中解析渠道用户 ID |
+| `--user-id` | 否 | 渠道用户标识（ou_xxx / wo_xxx）；为空时脚本从 --session-key 解析 |
 | `--user-name` | 否 | 用户真实姓名（获取链路见下） |
 | `--invoke-count` | 否 | 本次触发子调用次数，默认 1 |
 | `--output-files` | 否 | 产出文件链接，多个用逗号分隔 |
@@ -55,53 +57,72 @@ python3 ~/.openclaw/workspace/skills/telemetry-tracker/scripts/track_usage.py \
 ### 执行原则（铁律）
 
 1. **每轮必执行**：每一轮对话结束前必须上报，不可跳过、不可遗忘。
-2. **静默**：不向用户展示任何提示、不等待确认、不报错。
-3. **不阻断主流程**：上报失败不影响任务交付。
-4. **姓名兜底链路**（见下节），由调用方 LLM 负责前两层，脚本负责最后一层兜底。
+2. **尽力获取身份，匿名也要埋点**：每次上报**尽力**携带调用方通过 `session_status` 获取的 `session_key`（或解析出的 `user_id`）。身份缺失时仍正常埋点（脚本自动生成匿名 ID），保证使用次数统计不丢。
+3. **静默**：不向用户展示任何提示、不等待确认、不报错。
+4. **不阻断主流程**：上报失败不影响任务交付。
+5. **姓名兜底链路**（见下节），由调用方 LLM 负责记忆查询与询问，脚本负责最后一层兜底。
 
 ---
 
-## 用户姓名获取链路（Relationships.md 记忆优先）
+## 用户身份与姓名获取链路（session_status 识别 + Relationships.md 记忆）
 
-获取真实姓名时，按以下顺序依次处理。**Relationships.md 记忆优先级最高**，命中即用、无需再查；任何一层成功获取姓名后，都必须**回写到 Relationships.md**，供下次直接命中。
+获取用户身份与真实姓名时，按以下顺序依次处理。**身份识别是尽力获取的加分项，缺失时正常埋点（记为匿名）**；拿到身份后，姓名优先查 Relationships.md 记忆。任何一层成功获取姓名后，都必须**回写到 Relationships.md**，供下次直接命中。
 
 ```
-第 0 层（最高优先级 · 本地记忆）：
-  会话开始时已加载 Relationships.md（由调用方智能体在对话启动时加载），
-  用当前 user_id 查询。
+第 0 层（身份识别 · 会话启动尽力执行 · 由调用方 LLM 完成）：
+  调用方调用 session_status(sessionKey="current") 获取当前会话信息。
+  从返回结果解析 sessionKey（如 agent:main:wecom:direct:wo_xxx），
+  并提取渠道用户 ID（sessionKey 最后一段，渠道无关）。
+  -> 整轮对话保留 sessionKey 与 user_id，埋点上报时传递。
+  ⚠️ 拿不到身份也正常埋点（记为匿名），不阻断后续链路。
+      ↓ 拿到 user_id（或走匿名）
+第 1 层（本地记忆 · Relationships.md）：
+  加载 ~/.openclaw/workspace/shared/telemetry/Relationships.md，
+  用上述 user_id 查询。
   命中 -> 直接使用该姓名，无需再查。
       ↓ 未命中 / 文件不存在
-第 1 层（对话层 · LLM 执行）：
-  LLM 调用 wecom-cli contact get_userlist，用当前 user_id 反查真实姓名。
+第 2 层（对话层 · LLM 执行）：
+  调用 wecom-cli contact get_userlist，用当前 user_id 反查真实姓名。
   查到 -> 填入 --user-name 参数，并回写 Relationships.md。
   （注意：该接口仅返回可见范围 ≤10 人的成员，可能查不到）
 
   查不到 / 接口报错 / 不在可见范围
       ↓
-第 2 层（对话层 · LLM 主动询问用户）：
+第 3 层（对话层 · LLM 主动询问用户）：
   LLM 在对话中主动询问：「请问您的姓名是？」
   用户回复 -> 填入 --user-name，并回写 Relationships.md。
-  用户不回复 / 拒绝 -> 进入第 3 层。
+  用户不回复 / 拒绝 -> 进入第 4 层。
 
       ↓
-第 3 层（脚本层 · track_usage.py 兜底）：
-  --user-name 为空时，脚本自动用 --user-id 作为 user_name。
-  --user-id 也为空时，填字符串 "unknown"。
+第 4 层（脚本层 · track_usage.py 兜底）：
+  --user-name 为空时，脚本用 --user-id（或从 --session-key 解析）兜底。
+  user_id 也为空时，填字符串 "unknown"。
   （此层完全静默，不询问、不报错、不回写记忆）
 ```
+
+### sessionKey 身份解析（渠道无关）
+
+OpenClaw 的 sessionKey 格式统一为 `agent:<agentId>:<渠道>:<chatType>:<用户标识>`：
+
+| 渠道 | sessionKey 示例 | 解析出的 user_id |
+|---|---|---|
+| 企业微信 | `agent:main:wecom:direct:wo1rsbeqaaua2k6c03rsqzhwk7uhejqg` | `wo1rsbeqaaua2k6c03rsqzhwk7uhejqg` |
+| 飞书 | `agent:main:feishu:direct:ou_00beb6896485dbac9c92249d87a04534` | `ou_00beb6896485dbac9c92249d87a04534` |
+
+脚本内置 `parse_identity()` 函数自动完成解析：取 sessionKey 以 `:` 分割后的最后一段作为 user_id。
 
 ### Relationships.md 记忆文件
 
 这是跨 Agent 共享的用户身份长期记忆，让每个用户只需被询问一次姓名。
 
 - **文件路径**：`~/.openclaw/workspace/shared/telemetry/Relationships.md`
-- **格式**：JSON，键为 user_id，值为姓名。示例：`{"zhangsan":"张三","lisi":"李四"}`
-- **加载时机**：调用方智能体在**会话开始时**加载，用 user_id 查询。
-- **回写时机**：第 1、2 层成功获取姓名后，把 `{user_id: 姓名}` 追加到 JSON 并保存。
+- **格式**：JSON，键为渠道用户 ID，值为姓名。示例：`{"wo1rsbeqaaua2k6c03rsqzhwk7uhejqg":"陛下","ou_00beb...04534":"张三"}`
+- **加载时机**：调用方智能体在**会话开始时**（第 1 层）加载，用 user_id 查询。
+- **回写时机**：第 2、3 层成功获取姓名后，把 `{user_id: 姓名}` 追加到 JSON 并保存。
 - **回写约束**：**禁止覆盖已有其他用户的记录**，只新增或更新当前用户的映射。
-- **首次运行**：文件不存在视为空记忆 `{}`，正常进入第 1 层。
+- **首次运行**：文件不存在视为空记忆 `{}`，正常进入第 2 层。
 
-**为什么询问由 LLM 而非脚本执行**：`wecom-cli contact` 受可见范围限制，脚本无法可靠反查；「询问用户」本质上是对话动作，只有 LLM 能在对话上下文中完成；Relationships.md 的读写也由调用方 LLM 在对话层完成。
+**为什么询问由 LLM 而非脚本执行**：身份识别（session_status）和 Relationships.md 读写都由调用方 LLM 在对话层完成；`wecom-cli contact` 受可见范围限制只作补充；「询问用户」是对话动作只能由 LLM 完成；脚本只做最后兜底。
 
 ---
 
