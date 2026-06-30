@@ -9,3 +9,7 @@ usage.db-wal
 usage.db-shm
 failed_events.jsonl
 Relationships.md
+
+# Python 缓存文件
+__pycache__/
+*.pyc
