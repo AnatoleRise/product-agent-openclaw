@@ -229,39 +229,45 @@ workspace 路径：`~/.openclaw/workspace`
 
 ## 使用数据埋点与统计规则
 
-本系统通过 `telemetry-tracker` 技能实现使用数据采集与统计，数据存储在本地 SQLite 数据库，不依赖外部表格服务。主智能体只负责识别意图并调用该技能，具体的脚本执行与字段处理由技能内部完成。
+本系统通过 `telemetry-tracker` 技能 + 配套 `telemetry-auto-track` 钩子实现使用数据采集与统计，数据存储在本地 SQLite 数据库，不依赖外部表格服务。
 
-- **承载技能**：`telemetry-tracker`（采集与统计的唯一入口）
+**双轨采集机制**（覆盖两个维度，互不重复计数）：
+- **对话轮次（hook 轨）**：`telemetry-auto-track` 钩子监听 `message:received`，确定性记录每轮对话（`source=hook`，覆盖率 ~100%），主智能体**无需**为此上报。
+- **能力调用（LLM 轨）**：主智能体**仅在真触发了子智能体或技能**时，调用 `telemetry-tracker` 技能补充上报（`source=llm`，覆盖率 70-90%）。
+
+- **承载技能**：`telemetry-tracker`（能力调用上报与统计的唯一入口）
+- **配套钩子**：`telemetry-auto-track`（对话轮次确定性采集，监听 `message:received`）
 - **数据库位置**：`~/.openclaw/workspace/shared/telemetry/usage.db`（跨 Agent 共享区）
 - **兜底日志**：`~/.openclaw/workspace/shared/telemetry/failed_events.jsonl`
 
 ---
 
-### 一、自动埋点（硬触发 · 每轮必执行 · 静默）
+### 一、自动埋点（双轨 · 仅能力调用由主智能体上报 · 静默）
 
-> **执行策略：硬触发，每轮对话结束前必须执行。** 不依赖记忆、不依赖隐式规则，主智能体在每一轮回复用户前的最后一步，**必须调用 `telemetry-tracker` 技能**上报本条使用数据。全程静默，**不向用户展示任何提示信息、不等待用户确认**。
+> **执行策略：双轨采集。** 对话轮次由 hook 钩子确定性记录（无需主智能体介入）；主智能体**仅当本轮真触发了子智能体或技能**时，才调用 `telemetry-tracker` 技能补充上报能力调用维度。**纯对话/澄清/拒绝执行/未产出结果的情况，主智能体不上报**（已由 hook 兜底记录为 chat）。全程静默，不向用户展示提示。
 
-#### 触发条件（每轮必执行）
+#### 触发条件（仅能力调用上报）
 
-主智能体与用户完成每一轮交互后，**无论本轮是否触发了子智能体或技能，都必须上报 1 条使用数据**。根据本次实际调用的对象判定行为类型：
+主智能体与用户完成每一轮交互后，**仅当本轮实际触发了子智能体或技能**，才上报 1 条使用数据：
 
-| 本次行为 | event_type | target_name | 示例 |
-|------|------|------|------|
-| 调度了子智能体 | `agent` | 子智能体 ID | `product_discovery` |
-| 调用了技能 | `skill` | 技能目录名 | `prd-document-generator` |
-| 普通对话（未触发 Agent/Skill） | `chat` | `-` | `-` |
+| 本次行为 | 是否上报 | event_type | target_name | source | 示例 |
+|------|------|------|------|------|------|
+| 调度了子智能体 | ✅ 上报 | `agent` | 子智能体 ID | `llm` | `product_discovery` |
+| 调用了技能 | ✅ 上报 | `skill` | 技能目录名 | `llm` | `prd-document-generator` |
+| 普通对话（未触发 Agent/Skill） | ❌ 不上报 | — | — | — | 由 hook 记录 |
 
 #### 上报方式
 
-主智能体识别本次交互的行为类型后，**调用 `telemetry-tracker` 技能**完成使用数据的自动上报（不直接执行底层脚本）。调用时必须传递以下上下文：
+主智能体识别本次交互**确实触发了能力**后，**调用 `telemetry-tracker` 技能**完成能力调用的补充上报（不直接执行底层脚本）。调用时必须传递以下上下文：
 
-1. **会话身份**：会话启动时通过 `session_status` 获取的 `session_key` 与解析出的 `user_id`（身份识别的结果，整轮保留）。
-2. **行为类型**：agent / skill / chat。
-3. **目标信息**：目标 ID、中文名、用户原始输入、产出文件等。
+1. **会话身份**：会话启动时通过 `session_status` 获取的 `session_key` 与解析出的 `user_id`（身份识别的结果，整轮保留）。写入时由 `track_usage.py` 自动做身份归一化（session_key 能解析出真实渠道 ID 则用真实 ID，避免 ou_xxx 与 anon-xxx 两套碎片）。
+2. **数据来源**：固定传 `llm`（区别于 hook 的对话级采集）。
+3. **行为类型**：agent / skill（**不再有 chat**，chat 已由 hook 负责）。
+4. **目标信息**：目标 ID、中文名、用户原始输入、产出文件等。
 
 该技能内部会根据行为类型写入使用记录，并自动处理姓名获取链路与失败兜底，全程静默。
 
-> **注意**：`session_key` 与 `user_id` 用于区分多用户，**尽力获取并传递**。身份缺失时仍正常埋点（记为匿名），保证使用次数统计不丢。主智能体只负责识别行为与传递上下文，具体的字段拼接、脚本执行、写入逻辑由 `telemetry-tracker` 技能自行完成，详见 `skills/telemetry-tracker/SKILL.md`。
+> **注意**：`session_key` 与 `user_id` 用于区分多用户，**尽力获取并传递**。身份缺失时仍正常埋点（记为匿名），保证使用次数统计不丢。**hook 已在消息到达时尝试回写姓名到 Relationships.md，主智能体上报时优先复用**。详见 `skills/telemetry-tracker/SKILL.md`。
 
 ---
 
@@ -356,6 +362,7 @@ OpenClaw 的 sessionKey 格式统一为 `agent:<agentId>:<渠道>:<chatType>:<�
 | event_type | `agent` / `skill` / `chat` | `agent` |
 | target_name | 智能体或技能 ID；普通对话填 `-` | `product_discovery` |
 | target_label | 中文名 | `产品探索智能体` |
+| source | 数据来源：`llm`（智能体上报）/ `hook`（消息到达钩子） | `llm` |
 | user_query | 用户原始输入（截断 500 字） | `帮我做竞品分析` |
 | user_id | 渠道用户标识（sessionKey 最后一段）；取不到则脚本从 session_key 解析 | `wo1rsbeqaaua2k6c03rsqzhwk7uhejqg` |
 | user_name | 真实姓名；取不到回退 user_id / unknown | `张三` |
@@ -367,10 +374,52 @@ OpenClaw 的 sessionKey 格式统一为 `agent:<agentId>:<渠道>:<chatType>:<�
 
 ---
 
-### 六、重要提醒
+### 六、配套 hook 安装步骤
 
-1. **上报率**：自动埋点依赖 LLM 执行规则，覆盖率约 70-90%，统计值宜作趋势参考而非精确计数。
-2. **隐私**：`user_query` 保存用户原文（截断 500 字），数据库为本地文件，不上传外部。
+`telemetry-auto-track` 钩子承担对话轮次的确定性采集，必须安装并启用，否则对话维度统计会缺失。
+
+```bash
+# 1. 复制 hook 源文件到托管目录（OpenClaw 本机生效位置）
+mkdir -p ~/.openclaw/hooks/telemetry-auto-track
+cp skills/telemetry-tracker/hooks/telemetry-auto-track/{HOOK.md,handler.ts} \
+   ~/.openclaw/hooks/telemetry-auto-track/
+
+# 2. 启用 hook（Gateway 默认不发现内部 hook，必须显式启用）
+openclaw hooks enable telemetry-auto-track
+
+# 3. 检查启用状态
+openclaw hooks check
+
+# 4. 重启 Gateway 让 hook 加载
+```
+
+> 环境变量 `TELEMETRY_TRACK_SCRIPT` 可覆盖 `track_usage.py` 默认路径，按实际部署调整。
+
+---
+
+### 七、身份合并工具（运维手动执行）
+
+历史库中可能存在同一真实用户的身份碎片（`ou_xxx` + `anon-xxx`），`merge_users.py` 用于一次性治理。写入层归一化已从源头减少新碎片，此脚本仅治历史。
+
+```bash
+# 预览合并映射（不修改数据库，强烈建议先跑）
+python3 skills/telemetry-tracker/scripts/merge_users.py --dry-run
+
+# 执行合并（自动备份，单事务，幂等）
+python3 skills/telemetry-tracker/scripts/merge_users.py --apply
+```
+
+此脚本由运维**单独手动执行**，不纳入自动流程。
+
+---
+
+### 八、重要提醒
+
+1. **上报率（双口径）**：
+   - 对话轮次（source=hook）：钩子确定性采集，覆盖率 ~100%，可视为准确值。
+   - 能力调用（source=llm）：依赖智能体上报，覆盖率 70-90%，统计值宜作趋势参考而非精确计数。
+   - 汇报时**分口径呈现**，不得简单相加为虚高总数。
+2. **隐私**：`user_query` 保存用户原文（截断 500 字），数据库为本地文件，不上传外部。hook 同样不存储内容全文。
 3. **并发**：SQLite 已开启 WAL 模式 + busy_timeout=5s，多 Agent 并发够用。
 
 

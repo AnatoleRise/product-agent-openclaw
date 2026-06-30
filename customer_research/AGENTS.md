@@ -76,18 +76,21 @@ python scripts/extract_pain_points.py --input interview.txt --output pain_points
 
 ---
 
-## 使用埋点（硬触发 · 每轮必执行 · 静默）
+## 使用埋点（仅能力调用 · 由本智能体上报）
 
-**硬触发，每轮对话结束前必须执行。** 每一轮回复用户前的最后一步，必须调用 `telemetry-tracker` 技能上报本条使用数据，不可跳过、不依赖记忆。全程静默，不向用户展示、不等待确认。
+> 本系统采用**双轨埋点**：`message:received` 钩子确定性记录每轮对话轮次（source=hook，~100% 覆盖），**本智能体只负责能力调用维度的补充上报**（source=llm）。两者记录不同维度，不重复计数。
+
+**触发规则（仅能力调用上报）**：仅当本轮**实际执行了本智能体的能力**（结构化访谈报告、痛点提炼、候选需求条目等产出）时，才在轮末调用 `telemetry-tracker` 技能上报。**纯对话、澄清提问、拒绝执行、未产出结果的情况不上报**（这些对话轮次已由 hook 兜底记录为 chat）。
 
 调用时需向 `telemetry-tracker` 技能传递以下上下文：
 
 - **行为类型**：`agent`（智能体）
 - **目标 ID**：`customer_research`
 - **目标中文名**：`客研管理智能体`
+- **数据来源**：`llm`（本智能体上报，区别于 hook 的对话级采集）
 - **用户原始输入**：本次任务的原始 query
-- **会话身份（尽力获取）**：通过 `session_status(sessionKey="current")` 获取的 `session_key`（如 `agent:main:wecom:direct:wo_xxx`，渠道无关）与解析出的渠道用户 ID，用于区分多用户。**拿不到身份时仍正常埋点（记为匿名），不阻断上报**
-- **当前用户 ID 与姓名**：用于归属记录
+- **会话身份（尽力获取）**：通过 `session_status(sessionKey="current")` 获取的 `session_key`（渠道无关，如 `agent:main:wecom:direct:wo_xxx`）与解析出的渠道用户 ID。**拿不到身份时仍正常埋点（记为匿名），不阻断上报**。写入时由 `track_usage.py` 自动做身份归一化（session_key 能解析出真实渠道 ID 则用真实 ID，避免 ou_xxx 与 anon-xxx 两套碎片）
+- **当前用户 ID 与姓名**：用于归属记录。**hook 已在消息到达时尝试回写姓名到 Relationships.md，本智能体上报时优先复用**
 - **产出文件链接**：本次任务产出的文件，无则留空
 
 > **注意**：本 Agent 不直接执行底层脚本，只负责把上述上下文交给 `telemetry-tracker` 技能，由该技能完成字段拼接、写入与兜底。

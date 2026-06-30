@@ -1,6 +1,6 @@
 ---
 name: telemetry-tracker
-description: 使用数据埋点与统计技能。承担两个职责：(1) 自动埋点——被各智能体 AGENTS.md 和技能 SKILL.md 的「使用埋点」规则隐式调用，把每次 Agent/Skill 使用记录写入 SQLite 数据库；(2) 主动汇报——当用户询问"使用情况""调用统计""哪个用得多"等意图时，读取数据并生成中文文本汇报。
+description: 使用数据埋点与统计技能。承担两个职责：(1) 自动埋点——通过「双轨机制」采集使用数据：message:received 钩子确定性记录每轮对话轮次（source=hook），各智能体仅在真触发能力时补充上报（source=llm），写入 SQLite 数据库；(2) 主动汇报——当用户询问"使用情况""调用统计""哪个用得多"等意图时，读取数据并生成中文文本汇报。
 ---
 
 # 使用数据埋点与统计
@@ -9,7 +9,10 @@ description: 使用数据埋点与统计技能。承担两个职责：(1) 自动
 
 本技能是整个产品智能体系统的「数据底座」，承担两个互不干扰的职责：
 
-1. **自动埋点（职责 A）**：**硬触发，每轮对话结束前必须执行**。各智能体/技能在每一轮交互结束前调用本技能，静默记录一条使用数据到 SQLite 数据库。全程不向用户展示、不等待用户确认。
+1. **自动埋点（职责 A）**：采用**双轨采集机制**，覆盖两个维度，互不重复计数：
+   - **对话轮次（hook 轨）**：配套的 `telemetry-auto-track` 钩子监听 `message:received`，对每轮用户消息确定性记录一条 `chat` 事件（`source=hook`），覆盖率约 **100%**。
+   - **能力调用（LLM 轨）**：各智能体**仅在真正执行了能力**（产出 PRD、报告、评审等）时，才调用本技能上报一条 `agent`/`skill` 事件（`source=llm`），覆盖率约 **70-90%**（为下限）。
+   - **两者记录不同维度**：hook 记"对话发生了"，LLM 记"能力被调用了"。`stats_usage.py` 按双口径分别统计，不相加为虚高总数。
 2. **主动汇报（职责 B）**：当用户主动询问使用情况时，从数据库读取统计数据，组织成结构化中文文本汇报。
 
 ---
@@ -24,28 +27,47 @@ description: 使用数据埋点与统计技能。承担两个职责：(1) 自动
 
 ## 职责 A：自动埋点
 
-### 触发方式
+### 触发方式（双轨机制）
 
-**硬触发 · 每轮必执行**：不是用户主动调用本技能，而是各智能体/技能在**每一轮对话结束前**的最后一步，依据自身配置文件里的「使用埋点」规则，**必须调用本技能上报**。不依赖记忆、不依赖隐式规则、不可跳过。
+本系统采用**双轨采集**，hook 与 LLM 各司其职、记录不同维度：
+
+| 采集轨 | 触发方 | 记录内容 | source 值 | event_type | 覆盖率 |
+|--------|--------|---------|-----------|-----------|--------|
+| **hook 轨**（对话级） | `telemetry-auto-track` 钩子 | 每轮用户消息到达即记一条对话 | `hook` | `chat` | ~100% |
+| **LLM 轨**（能力级） | 各智能体轮末上报 | 仅真触发能力时记一条 | `llm` | `agent`/`skill` | 70-90% |
+
+**LLM 轨触发规则**：仅当本轮**实际执行了智能体能力或调用了技能**（有真实产出）时，才在轮末调用本技能上报。**纯对话、澄清提问、拒绝执行、未产出结果的情况不上报**（这些对话轮次已由 hook 兜底记录为 chat）。这样从根上避免同一次对话被重复计数。
+
+### hook 与 LLM 的职责边界
+
+- hook 只感知"用户消息到达"，**不感知**本轮是否调度了 agent 或调用了 skill。所以 hook 永远只记 `chat`。
+- LLM 只感知"我执行了能力"，在能力产出后补记 `agent`/`skill`。
+- 一次完整对话：hook 记 1 条 chat（对话轮次 +1），LLM 记 0 或 1 条 agent/skill（能力调用 +0 或 +1）。二者维度不同，不会重复计数。
 
 ### 上报命令
+
+**LLM 轨上报**（智能体执行能力后调用，source=llm）：
 
 ```bash
 python3 ~/.openclaw/workspace/skills/telemetry-tracker/scripts/track_usage.py \
   --event-type agent \
   --target-name product_discovery \
   --target-label "产品探索智能体" \
+  --source llm \
   --user-query "用户原始输入文本" \
   --session-key "agent:main:wecom:direct:wo_xxx" \
   --user-id wo_xxx \
   --user-name "张三"
 ```
 
+> hook 轨由 `handler.ts` 自动调用同一脚本并传 `--source hook --event-type chat --target-name -`，无需人工或 LLM 介入。
+
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | `--event-type` | 是 | `agent`（智能体）/ `skill`（技能）/ `chat`（普通对话） |
 | `--target-name` | 是 | 智能体或技能的 ID；普通对话填 `-` |
 | `--target-label` | 否 | 中文名，便于汇报展示 |
+| `--source` | 否 | 数据来源：`llm`（智能体上报，默认）/ `hook`（消息到达钩子）。用于双口径统计 |
 | `--user-query` | 否 | 用户原始输入（自动截断到 500 字） |
 | `--session-key` | 否 | 完整会话标识（渠道无关），由调用方通过 session_status 获取；脚本会从中解析渠道用户 ID |
 | `--user-id` | 否 | 渠道用户标识（ou_xxx / wo_xxx）；为空时脚本从 --session-key 解析 |
@@ -56,11 +78,12 @@ python3 ~/.openclaw/workspace/skills/telemetry-tracker/scripts/track_usage.py \
 
 ### 执行原则（铁律）
 
-1. **每轮必执行**：每一轮对话结束前必须上报，不可跳过、不可遗忘。
-2. **尽力获取身份，匿名也要埋点**：每次上报**尽力**携带调用方通过 `session_status` 获取的 `session_key`（或解析出的 `user_id`）。身份缺失时仍正常埋点（脚本自动生成匿名 ID），保证使用次数统计不丢。
-3. **静默**：不向用户展示任何提示、不等待确认、不报错。
-4. **不阻断主流程**：上报失败不影响任务交付。
-5. **姓名兜底链路**（见下节），由调用方 LLM 负责记忆查询与询问，脚本负责最后一层兜底。
+1. **仅能力调用上报（LLM 轨）**：智能体**仅在真触发能力**时上报（source=llm）。纯对话不上报，由 hook 兜底。对话轮次不再靠 LLM 每轮自觉记录。
+2. **身份归一化（治本）**：写入时由 `track_usage.py` 的 `normalize_identity` 自动归一化——能从 session_key 解析出真实渠道 ID（ou_/wo_ 等）则用真实 ID，避免同一用户在库中产生 `ou_xxx` 与 `anon-xxx` 两套碎片。
+3. **尽力获取身份，匿名也要埋点**：身份缺失时仍正常埋点（脚本生成稳定匿名 ID），保证统计不丢。
+4. **静默**：不向用户展示任何提示、不等待确认、不报错。
+5. **不阻断主流程**：上报失败不影响任务交付（失败自动写兜底日志，不丢失）。
+6. **姓名兜底链路**（见下节），由调用方 LLM 负责记忆查询与询问，脚本负责最后一层兜底。
 
 ---
 
@@ -181,13 +204,85 @@ python3 ~/.openclaw/workspace/skills/telemetry-tracker/scripts/stats_usage.py --
 
 ## 重要提醒
 
-1. **上报率说明**：自动埋点依赖 LLM 执行规则，实际覆盖率约 70-90%，统计数值应视为「下限」而非精确值。
-2. **隐私**：`user_query` 字段会保存用户原始输入（截断 500 字），如含敏感信息需注意。数据库为本地文件，不会上传外部服务。
+1. **上报率说明（双口径）**：
+   - **对话轮次**（source=hook）：由 message:received 钩子确定性采集，覆盖率 **~100%**，可视为准确值。
+   - **能力调用**（source=llm）：依赖智能体自觉上报，覆盖率 **70-90%**，统计数值应视为「下限」而非精确值。
+   - 汇报时需**分口径呈现**，不得简单相加为虚高总数。
+2. **隐私**：`user_query` 字段会保存用户原始输入（截断 500 字），如含敏感信息需注意。数据库为本地文件，不会上传外部服务。hook 同样不存储内容全文，截断逻辑沿用脚本上限。
 3. **并发**：SQLite 已开启 WAL 模式 + busy_timeout=5s，正常多 Agent 并发够用。
-4. **不入库**：`usage.db` 和 `failed_events.jsonl` 是运行时产物，不应提交到 Git。
+4. **不入库**：`usage.db`、`failed_events.jsonl`、`Relationships.md`、合并备份 `*.backup-*` 是运行时产物，不应提交到 Git（已被 `.gitignore` 忽略）。
+
+## 配套 hook：telemetry-auto-track
+
+本技能配套一个内部 hook，承担「对话级确定性采集」职责，弥补纯 LLM 上报的覆盖率不足。
+
+- **源文件位置**（随仓库分发）：`{baseDir}/hooks/telemetry-auto-track/`，含 `HOOK.md`（元数据）与 `handler.ts`（处理逻辑）。
+- **运行位置**：复制到 `~/.openclaw/hooks/telemetry-auto-track/`（托管目录，本机生效）。
+- **监听事件**：`message:received`。
+- **职责**：用户消息到达时，提取原文与渠道身份，调用 `track_usage.py` 写入一条 `source=hook` 的 chat 事件，确定性记录对话轮次。
+- **与 LLM 上报的关系**：hook 只记对话维度（chat），LLM 只记能力维度（agent/skill），二者不重复。详见上方「职责 A：触发方式（双轨机制）」。
+
+**安装步骤**：
+
+```bash
+# 1. 复制 hook 源文件到托管目录
+mkdir -p ~/.openclaw/hooks/telemetry-auto-track
+cp {baseDir}/hooks/telemetry-auto-track/{HOOK.md,handler.ts} \
+   ~/.openclaw/hooks/telemetry-auto-track/
+
+# 2. 启用 hook（Gateway 默认不发现内部 hook，必须显式启用）
+openclaw hooks enable telemetry-auto-track
+
+# 3. 检查启用状态
+openclaw hooks check
+
+# 4. 重启 Gateway 让 hook 加载
+```
+
+> 环境变量 `TELEMETRY_TRACK_SCRIPT` 可覆盖 `track_usage.py` 的默认路径，按实际部署调整。
+
+---
+
+## 身份合并工具：merge_users.py
+
+历史库中可能存在同一真实用户的多条碎片记录（`ou_xxx` + `anon-<sessionKey哈希>` + `anon-<uuid>` + `unknown`），导致按 user_id 统计时同一人被拆成多行。`merge_users.py` 用于**一次性治理历史碎片**（写入层归一化已从源头减少新碎片）。
+
+### 判定规则（与 track_usage.py 的 normalize_identity 一致）
+
+1. 真实渠道用户标识（前缀 `ou_/wo_/wm_/on_/u_`）= 权威身份
+2. `anon-` 系列若其 session_key 能解析出真实渠道标识 → 归并到该真实 ID
+3. 解析不出真实身份的 `anon-` → 保留不强行合并（避免误并不同匿名用户）
+4. `unknown` → 不与任何合并
+
+### 使用方式
+
+```bash
+# 1. 预览将要合并的映射（不修改数据库，强烈建议先跑）
+python3 {baseDir}/scripts/merge_users.py --dry-run
+
+# 2. 确认无误后执行实际合并（执行前自动备份数据库）
+python3 {baseDir}/scripts/merge_users.py --apply
+
+# 3. 指定数据库路径（默认 ~/.openclaw/workspace/shared/telemetry/usage.db）
+python3 {baseDir}/scripts/merge_users.py --apply --db-path /path/to/usage.db
+```
+
+### 安全保证
+
+- 默认 `--dry-run`，仅打印映射，不改库
+- 必须 `--apply` 才执行，执行前自动备份到 `<db>.backup-YYYYMMDDHHMMSS`
+- 全程单事务，任何异常自动回滚
+- 幂等：重复执行对已合并库不产生新变化
+- 若需回滚，用备份文件覆盖 `usage.db` 即可
+
+> 此脚本由运维/管理员**单独手动执行**，不纳入自动流程。建议在重大版本升级或定期清理时运行一次。
+
+---
 
 ## 依赖资源
 
-- `{baseDir}/scripts/track_usage.py` — 上报脚本（含自动建表）
-- `{baseDir}/scripts/stats_usage.py` — 统计脚本（summary/by-agent/by-skill/daily/export）
+- `{baseDir}/scripts/track_usage.py` — 上报脚本（含自动建表、身份归一化 normalize_identity）
+- `{baseDir}/scripts/stats_usage.py` — 统计脚本（双口径 summary/by-agent/by-skill/daily/export）
+- `{baseDir}/scripts/merge_users.py` — 历史用户身份碎片合并脚本（dry-run/apply/备份）
 - `{baseDir}/references/reporting_template.md` — 汇报话术模板
+- `{baseDir}/hooks/telemetry-auto-track/` — 配套 message:received 钩子（HOOK.md + handler.ts）

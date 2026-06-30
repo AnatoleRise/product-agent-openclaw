@@ -86,14 +86,33 @@ def _append_cond(where_sql: str, params: list, cond_sql: str) -> tuple:
 def query_summary(conn, args) -> None:
     where_sql, params = _build_where(args)
 
-    # 总览数据
-    total = conn.execute(f"SELECT COUNT(*) AS c FROM usage_events{where_sql}", params).fetchone()["c"]
+    # 总量按来源分口径统计，避免 hook（对话轮次）与 llm（能力调用）混算成虚高总数
+    # 对话轮次：source='hook'（每条用户消息到达即记录一次，~100% 覆盖）
+    hook_sql, hook_params = _append_cond(where_sql, params, "source='hook'")
+    chat_turns = conn.execute(
+        f"SELECT COUNT(*) AS c FROM usage_events{hook_sql}", hook_params
+    ).fetchone()["c"]
+
+    # 能力调用次数：source='llm' 且 event_type 为 agent/skill（智能体上报，70-90% 下限）
+    capability_sql, capability_params = _append_cond(
+        where_sql, params, "source='llm' AND event_type IN ('agent','skill')"
+    )
+    capability_calls = conn.execute(
+        f"SELECT COUNT(*) AS c FROM usage_events{capability_sql}", capability_params
+    ).fetchone()["c"]
+
+    total = chat_turns + capability_calls
+
     # status 过滤需正确拼接 WHERE/AND，统一走 _append_cond 避免空 where 时语法错误
     success_sql, success_params = _append_cond(where_sql, params, "status='success'")
     success = conn.execute(
         f"SELECT COUNT(*) AS c FROM usage_events{success_sql}", success_params
     ).fetchone()["c"]
-    fail = total - success
+    # 失败数仍以全表为分母（含所有来源），反映系统稳定性
+    full_total = conn.execute(
+        f"SELECT COUNT(*) AS c FROM usage_events{where_sql}", params
+    ).fetchone()["c"]
+    fail = full_total - success
 
     # 按 event_type 分布
     type_rows = conn.execute(
@@ -105,18 +124,19 @@ def query_summary(conn, args) -> None:
         params,
     ).fetchall()
 
-    # 活跃目标 TOP10（agent + skill 合并）
+    # 活跃目标 TOP10（仅 agent + skill，排除 chat 的 target_name='-' 对话轮次）
+    top_sql, top_params = _append_cond(where_sql, params, "event_type IN ('agent','skill')")
     top_rows = conn.execute(
         f"""
         SELECT target_name, target_label, event_type, COUNT(*) AS c,
                COUNT(DISTINCT user_id) AS users,
                MAX(created_at) AS last_at
-        FROM usage_events{where_sql}
+        FROM usage_events{top_sql}
         GROUP BY target_name
         ORDER BY c DESC
         LIMIT 10
         """,
-        params,
+        top_params,
     ).fetchall()
 
     # 按天趋势
@@ -134,7 +154,7 @@ def query_summary(conn, args) -> None:
         f"""
         SELECT user_id, user_name, COUNT(*) AS c, MAX(created_at) AS last_at
         FROM usage_events{where_sql}
-        GROUP BY user_id, user_name ORDER BY c DESC LIMIT 10
+        GROUP BY user_id ORDER BY c DESC LIMIT 10
         """,
         params,
     ).fetchall()
@@ -144,7 +164,13 @@ def query_summary(conn, args) -> None:
     print("📊 使用情况总览")
     print("=" * 56)
     print(f"统计区间：{_range_label(args)}")
-    print(f"总调用次数：{total}（成功 {success}，失败 {fail}）")
+    # 双口径：对话轮次（hook 确定性）+ 能力调用（智能体上报下限），不相加为虚高总数
+    print(f"对话轮次（hook 采集）：{chat_turns}")
+    print(f"能力调用（智能体上报）：{capability_calls}")
+    print(f"  —— 两者为不同口径，不简单相加；成功 {success}，失败 {fail}")
+    print()
+    print("口径说明：对话轮次由 message:received 钩子确定性采集（~100%）；")
+    print("         能力调用由智能体轮末上报（覆盖率 70-90%，为下限值）。")
     print()
 
     print("【按类型分布】")
@@ -171,7 +197,9 @@ def query_summary(conn, args) -> None:
             # 匿名用户（anon-xxx）显示脱敏，已知用户显示姓名
             is_anon = r["user_id"].startswith("anon-") if r["user_id"] else False
             tag = "（匿名）" if is_anon else ""
-            print(f"  {i:2d}. {r['user_name']}{tag}  {r['c']} 次 / 最近 {r['last_at']}")
+            # GROUP BY user_id 后，user_name 取该 user_id 下任一非空姓名（库内已归一）
+            display_name = r["user_name"] or r["user_id"]
+            print(f"  {i:2d}. {display_name}{tag}  {r['c']} 次 / 最近 {r['last_at']}")
     print()
 
     print("【每日趋势】")
@@ -278,7 +306,7 @@ def query_export(conn, args) -> None:
     rows = conn.execute(
         f"""
         SELECT event_type, target_name, target_label, user_query, user_id, user_name,
-               invoke_count, turn_no, output_files, status, created_at
+               invoke_count, turn_no, output_files, status, source, created_at
         FROM usage_events{where_sql}
         ORDER BY created_at DESC
         """,

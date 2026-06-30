@@ -95,15 +95,18 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             turn_no       INTEGER DEFAULT 1,  -- 交互轮次（已弃用，恒为 1）
             output_files  TEXT,               -- 产出文件链接，JSON 数组字符串
             status        TEXT    DEFAULT 'success',  -- success / failed
+            source        TEXT    DEFAULT 'llm',      -- 数据来源：llm（智能体上报）/ hook（消息到达钩子）
             created_at    TEXT    NOT NULL    -- 上报时间 ISO 格式
         )
         """
     )
 
-    # ---- 2. 自动迁移：旧库无 session_key 列时自动补列（幂等，独立提交）----
+    # ---- 2. 自动迁移：旧库补列（幂等，每列独立判断后统一建索引）----
     cols = [r[1] for r in conn.execute("PRAGMA table_info(usage_events)").fetchall()]
     if "session_key" not in cols:
         conn.execute("ALTER TABLE usage_events ADD COLUMN session_key TEXT")
+    if "source" not in cols:
+        conn.execute("ALTER TABLE usage_events ADD COLUMN source TEXT DEFAULT 'llm'")
 
     # ---- 3. 建索引（迁移完成后，确保列都存在再建索引）----
     conn.executescript(
@@ -178,6 +181,41 @@ def _looks_like_real_user_id(candidate: str) -> bool:
     return candidate.startswith(REAL_USER_ID_PREFIXES)
 
 
+def normalize_identity(
+    user_id: str,
+    session_key: str = "",
+    anon_id: str = "",
+) -> str:
+    """
+    身份归一化（治本）：避免同一真实用户在库中产生 ou_xxx 与 anon-xxx 两套碎片记录。
+
+    归一规则（与 merge_users.py 历史合并脚本保持一致）：
+        1. user_id 已是真实渠道用户标识（ou_/wo_/wm_/on_/u_ 前缀）-> 原样返回
+        2. user_id 为空或 anon- 系列，但能从 session_key 解析出真实渠道标识 -> 用真实 ID
+        3. 仍拿不到真实身份 -> 返回匿名 ID（anon-xxx），保证至少计入次数
+
+    本函数供 record_event 写入时调用，从源头减少新碎片；
+    merge_users.py 负责治理历史库中已存在的碎片。
+    """
+    # 已是真实身份：直接返回（含调用方显式传入的非前缀命名 ID 也信任）
+    if user_id and not user_id.startswith("anon-"):
+        return user_id
+
+    # 尝试从 session_key 解析真实渠道标识
+    real_id = ""
+    if session_key:
+        identity = parse_identity(session_key)
+        candidate = identity.get("user_id", "")
+        if candidate and _looks_like_real_user_id(candidate):
+            real_id = candidate
+
+    if real_id:
+        return real_id
+
+    # 仍无真实身份：生成稳定匿名 ID（同 session_key 稳定聚合）
+    return resolve_anon_id(session_key=session_key, anon_id=anon_id)
+
+
 # ============================================================
 # 核心写入逻辑
 # ============================================================
@@ -195,10 +233,14 @@ def record_event(
     turn_no: int = 1,
     output_files=None,
     status: str = "success",
+    source: str = "llm",
     db_path: str = DEFAULT_DB_PATH,
 ) -> bool:
     """
     写入一条使用记录。
+
+    source：数据来源标记。llm=智能体轮末上报（能力调用），hook=message:received 钩子上报（对话轮次）。
+            用于 stats_usage 双口径统计，避免重复计数。
 
     身份解析优先级（尽力获取，缺失也正常埋点）：
         1. 显式传入的 user_id 非空 -> 直接用（已知用户）
@@ -218,18 +260,10 @@ def record_event(
     event_type = (event_type or "chat").strip().lower()
     target_name = (target_name or "-").strip() or "-"
 
-    # 身份解析：显式 user_id 优先，否则从 session_key 解析
-    # 注意：session_key 末段只有符合已知渠道用户标识格式才视为真实身份，
-    # 否则（如 webchat 渠道的随机串）视为无效，走匿名兜底。
-    if not user_id and session_key:
-        identity = parse_identity(session_key)
-        candidate = identity.get("user_id", "")
-        if candidate and _looks_like_real_user_id(candidate):
-            user_id = candidate
-
-    # 匿名兜底：拿不到真实身份时，生成匿名 ID，确保匿名访问也计入统计
-    if not user_id:
-        user_id = resolve_anon_id(session_key=session_key, anon_id=anon_id)
+    # 身份解析 + 归一化：显式真实 user_id 优先；否则从 session_key 解析真实渠道标识；
+    # 都拿不到则匿名。统一走 normalize_identity，与 merge_users.py 保持一致，
+    # 避免同一真实用户在库中产生 ou_xxx 与 anon-xxx 两套碎片。
+    user_id = normalize_identity(user_id, session_key=session_key, anon_id=anon_id)
 
     # 姓名兜底：有真实身份用 user_id，否则标记为匿名用户
     if not user_name:
@@ -262,6 +296,7 @@ def record_event(
         "turn_no": int(turn_no) if turn_no else 1,
         "output_files": output_files_json,
         "status": status or "success",
+        "source": (source or "llm").strip().lower(),
         "created_at": created_at,
     }
 
@@ -273,10 +308,10 @@ def record_event(
                 """
                 INSERT INTO usage_events
                     (event_type, target_name, target_label, user_query, user_id,
-                     user_name, session_key, invoke_count, turn_no, output_files, status, created_at)
+                     user_name, session_key, invoke_count, turn_no, output_files, status, source, created_at)
                 VALUES
                     (:event_type, :target_name, :target_label, :user_query, :user_id,
-                     :user_name, :session_key, :invoke_count, :turn_no, :output_files, :status, :created_at)
+                     :user_name, :session_key, :invoke_count, :turn_no, :output_files, :status, :source, :created_at)
                 """,
                 row,
             )
@@ -327,21 +362,21 @@ def _replay_fallback(conn: sqlite3.Connection, db_path: str) -> int:
             # 兜底记录可能缺字段（旧版本），补默认值
             row.setdefault("session_key", "")
             row.setdefault("turn_no", 1)
-            # 回灌记录若缺真实身份，补匿名 ID（与正常写入逻辑一致，保证老数据也能计数）
-            uid = row.get("user_id", "")
-            if not uid:
-                sk = row.get("session_key", "")
-                row["user_id"] = resolve_anon_id(session_key=sk)
+            row.setdefault("source", "llm")  # 旧兜底日志缺 source，默认视为 llm 来源
+            # 回灌记录身份走归一化（与正常写入一致，避免历史兜底记录继续制造碎片）
+            row["user_id"] = normalize_identity(
+                row.get("user_id", ""), session_key=row.get("session_key", "")
+            )
             if not row.get("user_name"):
                 row["user_name"] = "匿名用户" if row["user_id"].startswith("anon-") else row["user_id"]
             conn.execute(
                 """
                 INSERT INTO usage_events
                     (event_type, target_name, target_label, user_query, user_id,
-                     user_name, session_key, invoke_count, turn_no, output_files, status, created_at)
+                     user_name, session_key, invoke_count, turn_no, output_files, status, source, created_at)
                 VALUES
                     (:event_type, :target_name, :target_label, :user_query, :user_id,
-                     :user_name, :session_key, :invoke_count, :turn_no, :output_files, :status, :created_at)
+                     :user_name, :session_key, :invoke_count, :turn_no, :output_files, :status, :source, :created_at)
                 """,
                 row,
             )
@@ -413,6 +448,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         choices=["success", "failed"],
         help="本次执行状态，默认 success",
     )
+    parser.add_argument(
+        "--source",
+        default="llm",
+        choices=["llm", "hook"],
+        help="数据来源：llm=智能体轮末上报（能力调用），hook=message:received 钩子上报（对话轮次）。默认 llm",
+    )
     parser.add_argument("--db-path", default=DEFAULT_DB_PATH, help=argparse.SUPPRESS)
     return parser
 
@@ -437,6 +478,7 @@ def main(argv=None) -> int:
         invoke_count=args.invoke_count,
         output_files=output_files,
         status=args.status,
+        source=args.source,
         db_path=args.db_path,
     )
 
